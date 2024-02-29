@@ -190,7 +190,7 @@ public class ManagedLedgerImpl implements ManagedLedger, CreateCallback {
     private volatile long totalSize = 0;
 
     // Cursors that are waiting to be notified when new entries are persisted
-    final ConcurrentLinkedQueue<ManagedCursorImpl> waitingCursors;
+    final ConcurrentHashMap<String, ManagedCursorImpl> waitingCursors;
 
     // Objects that are waiting to be notified when new entries are persisted
     final ConcurrentLinkedQueue<WaitingEntryCallBack> waitingEntryCallBacks;
@@ -355,7 +355,7 @@ public class ManagedLedgerImpl implements ManagedLedger, CreateCallback {
             this.managedLedgerInterceptor = config.getManagedLedgerInterceptor();
         }
         this.entryCache = factory.getEntryCacheManager().getEntryCache(this);
-        this.waitingCursors = Queues.newConcurrentLinkedQueue();
+        this.waitingCursors = new ConcurrentHashMap<>();
         this.waitingEntryCallBacks = Queues.newConcurrentLinkedQueue();
         this.uninitializedCursors = new HashMap();
         this.clock = config.getClock();
@@ -2399,13 +2399,14 @@ public class ManagedLedgerImpl implements ManagedLedger, CreateCallback {
     }
 
     void notifyCursors() {
-        while (true) {
-            final ManagedCursorImpl waitingCursor = waitingCursors.poll();
-            if (waitingCursor == null) {
-                break;
-            }
+        Iterator<Map.Entry<String, ManagedCursorImpl>> iterator = waitingCursors.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<String, ManagedCursorImpl> entry = iterator.next();
+            ManagedCursorImpl waitingCursor = entry.getValue();
 
             executor.execute(waitingCursor::notifyEntriesAvailable);
+
+            iterator.remove();
         }
     }
 
@@ -3801,7 +3802,7 @@ public class ManagedLedgerImpl implements ManagedLedger, CreateCallback {
 
 
     public void removeWaitingCursor(ManagedCursor cursor) {
-        this.waitingCursors.remove(cursor);
+        this.waitingCursors.remove(cursor.getName());
     }
 
     public boolean isCursorActive(ManagedCursor cursor) {
